@@ -8,9 +8,15 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+./node_modules
 dist
 dist-ssr
 *.local
+
+# 환경 변수 (API 키 등) — 절대 커밋하지 않음
+.env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*
