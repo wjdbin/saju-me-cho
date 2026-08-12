@@ -31,7 +31,48 @@ function calendarLabel(calendarType) {
   return calendarType || ''
 }
 
+/** OAuth 실패 시 URL에 실려 오는 에러를 읽습니다 */
+function readOAuthErrorFromUrl() {
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const queryParams = new URLSearchParams(window.location.search)
+  const description =
+    hashParams.get('error_description') ||
+    queryParams.get('error_description') ||
+    hashParams.get('error') ||
+    queryParams.get('error')
+
+  if (!description) return null
+  return decodeURIComponent(description.replace(/\+/g, ' '))
+}
+
+/** 로그인 후 URL에 남은 code/error 파라미터를 정리합니다 */
+function clearAuthParamsFromUrl() {
+  const url = new URL(window.location.href)
+  const keys = ['code', 'state', 'error', 'error_code', 'error_description']
+  let changed = false
+
+  for (const key of keys) {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key)
+      changed = true
+    }
+  }
+
+  if (url.hash) {
+    url.hash = ''
+    changed = true
+  }
+
+  if (changed) {
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}`)
+  }
+}
+
 function App() {
+  const [session, setSession] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [authBusy, setAuthBusy] = useState(false)
+
   const [name, setName] = useState('')
   const [birthDate, setBirthDate] = useState('')
   const [birthTime, setBirthTime] = useState('')
@@ -55,11 +96,20 @@ function App() {
     }
   }
 
+  const requireAuth = () => {
+    requireSupabase()
+    if (!session?.user) {
+      throw new Error('Google 로그인이 필요합니다.')
+    }
+    return session.user
+  }
+
   const loadReadings = async () => {
     try {
-      requireSupabase()
+      requireAuth()
     } catch (err) {
       setError(err.message)
+      setReadings([])
       return
     }
 
@@ -78,8 +128,113 @@ function App() {
   }
 
   useEffect(() => {
-    loadReadings()
+    if (!isSupabaseConfigured || !supabase) {
+      setAuthLoading(false)
+      setError(
+        'Supabase 환경 변수가 없습니다. .env에 VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY를 넣고 개발 서버를 재시작하세요.'
+      )
+      return
+    }
+
+    let mounted = true
+
+    const oauthError = readOAuthErrorFromUrl()
+    if (oauthError) {
+      setError(oauthError)
+      clearAuthParamsFromUrl()
+    }
+
+    supabase.auth.getSession().then(({ data, error: sessionError }) => {
+      if (!mounted) return
+      if (sessionError) {
+        setError(`세션 확인 실패: ${sessionError.message}`)
+      }
+      setSession(data.session ?? null)
+      setAuthLoading(false)
+      if (data.session) {
+        clearAuthParamsFromUrl()
+      }
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      setSession(nextSession)
+      setAuthLoading(false)
+      if (event === 'SIGNED_IN') {
+        clearAuthParamsFromUrl()
+        setAuthBusy(false)
+        setError('')
+      }
+      if (event === 'SIGNED_OUT') {
+        setAuthBusy(false)
+      }
+    })
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
+
+  useEffect(() => {
+    if (authLoading) return
+
+    if (!session?.user) {
+      setReadings([])
+      setSelectedId(null)
+      setResult('')
+      return
+    }
+
+    setError('')
+    loadReadings()
+  }, [session, authLoading])
+
+  const handleGoogleSignIn = async () => {
+    setError('')
+    setAuthBusy(true)
+
+    try {
+      requireSupabase()
+
+      const { error: signInError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/`,
+          queryParams: {
+            prompt: 'select_account',
+          },
+        },
+      })
+
+      if (signInError) {
+        throw signInError
+      }
+    } catch (err) {
+      setError(err.message || 'Google 로그인 중 오류가 발생했습니다.')
+      setAuthBusy(false)
+    }
+  }
+
+  const handleSignOut = async () => {
+    setError('')
+    setAuthBusy(true)
+
+    try {
+      requireSupabase()
+      const { error: signOutError } = await supabase.auth.signOut()
+      if (signOutError) {
+        throw signOutError
+      }
+      handleNewSaju()
+      setReadings([])
+    } catch (err) {
+      setError(err.message || '로그아웃 중 오류가 발생했습니다.')
+    } finally {
+      setAuthBusy(false)
+    }
+  }
 
   const handleNameChange = (e) => {
     setName(e.target.value)
@@ -124,23 +279,24 @@ function App() {
     })
   }
 
-  const readingPayload = (text) => ({
+  const readingPayload = (text, userId) => ({
     name,
     birth_date: birthDate,
     birth_time: birthTime,
     gender,
     calendar_type: calendarType,
     result: text,
+    user_id: userId,
   })
 
   /** Create / Update — 선택 중이면 수정, 아니면 새로 저장 */
   const saveReading = async (text) => {
-    requireSupabase()
+    const user = requireAuth()
 
     if (selectedId) {
       const { data, error: updateError } = await supabase
         .from('saju_readings')
-        .update(readingPayload(text))
+        .update(readingPayload(text, user.id))
         .eq('id', selectedId)
         .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at')
         .single()
@@ -155,7 +311,7 @@ function App() {
 
     const { data, error: insertError } = await supabase
       .from('saju_readings')
-      .insert(readingPayload(text))
+      .insert(readingPayload(text, user.id))
       .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at')
       .single()
 
@@ -201,7 +357,7 @@ function App() {
     setError('')
 
     try {
-      requireSupabase()
+      requireAuth()
 
       const { error: deleteError } = await supabase
         .from('saju_readings')
@@ -258,11 +414,58 @@ function App() {
     }
   }
 
-  const busy = loading || saving
+  const busy = loading || saving || authBusy
+  const userEmail = session?.user?.email ?? ''
+  const userName =
+    session?.user?.user_metadata?.full_name ||
+    session?.user?.user_metadata?.name ||
+    userEmail
+
+  if (authLoading) {
+    return (
+      <div className="auth-screen">
+        <p className="auth-status">로그인 상태 확인 중...</p>
+      </div>
+    )
+  }
+
+  if (!session?.user) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card">
+          <p className="auth-eyebrow">saju-me</p>
+          <h1>사주 입력</h1>
+          <p className="auth-copy">Google 계정으로 로그인한 뒤 내 사주를 저장하고 관리하세요.</p>
+          <button
+            type="button"
+            className="google-btn"
+            onClick={handleGoogleSignIn}
+            disabled={authBusy || !isSupabaseConfigured}
+          >
+            {authBusy ? 'Google로 이동 중...' : 'Google로 계속하기'}
+          </button>
+          {error && <p className="error">{error}</p>}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="layout">
       <aside className="sidebar">
+        <div className="auth-bar">
+          <p className="auth-user" title={userEmail}>
+            {userName}
+          </p>
+          <button
+            type="button"
+            className="signout-btn"
+            onClick={handleSignOut}
+            disabled={busy}
+          >
+            로그아웃
+          </button>
+        </div>
         <h2 className="sidebar-title">저장된 사주</h2>
         <button type="button" className="new-saju-btn" onClick={handleNewSaju} disabled={busy}>
           새 사주 만들기
