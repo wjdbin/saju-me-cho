@@ -43,10 +43,116 @@ body {
   padding: 2.5rem 1rem 4rem;
 }
 
+.layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 860px;
+}
+
+.sidebar {
+  flex: 0 0 180px;
+  padding: 1.25rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 2px);
+  text-align: left;
+}
+
+.sidebar-title {
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.new-saju-btn {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.9rem;
+  padding: 0.7rem 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+  background: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.new-saju-btn:hover {
+  background: #000;
+}
+
+.new-saju-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.2);
+}
+
+.new-saju-btn--ghost {
+  width: auto;
+  margin: 0;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.82rem;
+  color: var(--ink);
+  background: transparent;
+  border-color: var(--line);
+}
+
+.new-saju-btn--ghost:hover {
+  background: var(--bg);
+  border-color: var(--line-strong);
+}
+
+.sidebar-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.sidebar-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sidebar-item {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.35rem;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.sidebar-item:hover {
+  background: var(--bg);
+  border-color: var(--line);
+}
+
+.sidebar-item.is-active {
+  background: var(--bg);
+  border-color: var(--line-strong);
+}
+
 .app {
+  flex: 1;
   width: 100%;
   max-width: 630px;
-  margin: 0 auto;
+  margin: 0;
   padding: 2rem 1.5rem 2.25rem;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -55,11 +161,19 @@ body {
 }
 
 .app h1 {
-  margin: 0 0 0.35rem;
+  margin: 0;
   font-size: 1.65rem;
   font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--ink);
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
 }
 
 /* 입력 영역은 왼쪽 정렬(라벨·입력 가독성), 블록은 가운데 */
@@ -162,27 +276,66 @@ body {
 
 .result {
   margin-top: 1.75rem;
-  padding-top: 1.5rem;
+  padding: 1.35rem 0 0;
   border-top: 1px solid var(--line);
+  text-align: left;
+  animation: result-in 0.35s ease;
+}
+
+@keyframes result-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.result-header {
+  margin: 0 0 1rem;
+  padding: 1.15rem 1.2rem 1.2rem;
+  background: linear-gradient(180deg, #fafafa 0%, #f3f3f3 100%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   text-align: left;
 }
 
-.result h2 {
-  margin: 0 0 0.85rem;
-  font-size: 1.05rem;
+.result-eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.result-name {
+  margin: 0 0 0.45rem;
+  font-size: 1.45rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  text-align: center;
+  letter-spacing: -0.03em;
+  line-height: 1.25;
   color: var(--ink);
+  text-align: left;
+}
+
+.result-meta {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  word-break: keep-all;
 }
 
 .result-text {
   margin: 0;
-  padding: 1.25rem 1.2rem 1.4rem;
-  font-size: 0.95rem;
-  line-height: 1.75;
+  padding: 1.35rem 1.25rem 1.5rem;
+  font-size: 0.96rem;
+  line-height: 1.8;
   color: var(--ink);
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   word-break: keep-all;
@@ -264,6 +417,29 @@ body {
   border-left: 3px solid #bbb;
 }
 
+@media (max-width: 720px) {
+  .layout {
+    flex-direction: column;
+    max-width: 630px;
+  }
+
+  .sidebar {
+    flex: none;
+    width: 100%;
+  }
+
+  .sidebar-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .sidebar-item {
+    width: auto;
+    margin: 0;
+  }
+}
+
 @media (max-width: 480px) {
   #root {
     padding: 1.25rem 0.75rem 2.5rem;
@@ -271,6 +447,12 @@ body {
 
   .app {
     padding: 1.5rem 1.1rem 1.75rem;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+
+  .sidebar {
     border-radius: 0;
     border-left: none;
     border-right: none;
