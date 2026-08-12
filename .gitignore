@@ -13,7 +13,7 @@ dist
 dist-ssr
 *.local
 
-# 환경 변수 (API 키 등) — 절대 커밋하지 않음
+# ?�경 변??(API ???? ???��? 커밋?��? ?�음
 .env
 .env.*
 !.env.example
@@ -30,4 +30,4 @@ dist-ssr
 *.sw?
 
 .vercel
-.env*
+
