@@ -121,9 +121,9 @@ function App() {
       return
     }
 
-    setLoading(true)
     setError('')
     setResult('')
+    setLoading(true)
 
     try {
       const prompt = buildSajuPrompt({
@@ -135,8 +135,15 @@ function App() {
         age: getAge(birthDate),
       })
 
+      // 스켈레톤이 먼저 그려지도록 한 프레임 양보
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+      document.getElementById('saju-result')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+
       const text = await askGemini(prompt)
-      showResult(text)
+      showResult(text, { scroll: false })
 
       if (!isSupabaseConfigured || !supabase) {
         throw new Error(
@@ -264,7 +271,35 @@ function App() {
 
         {error && <p className="error">{error}</p>}
 
-        {result && (
+        {loading && (
+          <section
+            id="saju-result"
+            className="skeleton-panel"
+            aria-busy="true"
+            aria-live="polite"
+          >
+            <div className="skeleton-panel-header">
+              <span className="skeleton-bone skeleton-bone--eyebrow" />
+              <span className="skeleton-bone skeleton-bone--title" />
+              <span className="skeleton-bone skeleton-bone--meta" />
+            </div>
+            <div className="skeleton-panel-body">
+              <span className="skeleton-bone skeleton-bone--heading" />
+              <span className="skeleton-bone" />
+              <span className="skeleton-bone" />
+              <span className="skeleton-bone skeleton-bone--short" />
+              <span className="skeleton-bone skeleton-bone--heading" />
+              <span className="skeleton-bone" />
+              <span className="skeleton-bone" />
+              <span className="skeleton-bone skeleton-bone--mid" />
+              <span className="skeleton-bone" />
+              <span className="skeleton-bone skeleton-bone--short" />
+            </div>
+            <p className="skeleton-status">사주를 풀이하고 있어요...</p>
+          </section>
+        )}
+
+        {!loading && result && (
           <section id="saju-result" className="result" key={resultKey}>
             <header className="result-header">
               <p className="result-eyebrow">해석 결과</p>
