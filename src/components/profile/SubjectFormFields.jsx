@@ -23,15 +23,17 @@ export function SubjectFormFields({ idPrefix, values, onFieldChange, disabled, a
         required
       />
 
-      <label htmlFor={`${idPrefix}-birthTime`}>태어난 시간</label>
+      <label htmlFor={`${idPrefix}-birthTime`}>
+        태어난 시간 <span className="field-optional">선택</span>
+      </label>
       <input
         id={`${idPrefix}-birthTime`}
         type="time"
         value={values.birth_time}
         onChange={onFieldChange('birth_time')}
         disabled={disabled}
-        required
       />
+      <p className="field-hint">모르면 비워 두라멍. 시주 없이 년월일로 보겠다멍.</p>
 
       <label htmlFor={`${idPrefix}-gender`}>성별</label>
       <select

@@ -1,7 +1,7 @@
 # 멍사주 (saju-me-cho)
 
 한복을 입은 골든 리트리버 사주가 **멍사주**가 사실대로 말해주는 AI 사주 해석 웹앱입니다.  
-이름·생년월일·출생 시간·성별·양력/음력을 바탕으로 Gemini가 해석하고, Supabase에 저장·공유할 수 있습니다.
+이름·생년월일·성별·양력/음력을 바탕으로 Gemini가 해석하고, Supabase에 저장·공유할 수 있습니다. 태어난 시간은 모르면 비워 둘 수 있습니다.
 
 배포: [https://saju-me-cho.vercel.app/](https://saju-me-cho.vercel.app/)
 

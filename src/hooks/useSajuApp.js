@@ -11,6 +11,7 @@ import {
   formatReadingLabel,
   getAge,
   isProfileComplete,
+  normalizeBirthTime,
 } from '../lib/profile'
 import { getPreviewMarkdown } from '../components/saju'
 import { consumeLoginPending, markLoginPending, trackEvent } from '../lib/analytics'
@@ -323,19 +324,13 @@ export function useSajuApp() {
       id: userId,
       name: String(subject.name || '').trim(),
       birth_date: subject.birth_date,
-      birth_time: String(subject.birth_time || '').slice(0, 5),
+      birth_time: normalizeBirthTime(subject.birth_time),
       gender: subject.gender,
       calendar_type: subject.calendar_type,
     }
 
-    if (
-      !payload.name ||
-      !payload.birth_date ||
-      !payload.birth_time ||
-      !payload.gender ||
-      !payload.calendar_type
-    ) {
-      throw new Error('이름, 생년월일, 시간, 성별, 양력/음력을 모두 입력해 주세요.')
+    if (!payload.name || !payload.birth_date || !payload.gender || !payload.calendar_type) {
+      throw new Error('이름, 생년월일, 성별, 양력/음력을 입력해 주세요.')
     }
 
     const { data, error: upsertError } = await supabase
@@ -380,7 +375,7 @@ export function useSajuApp() {
       user_id: user.id,
       name: subject.name,
       birth_date: subject.birth_date,
-      birth_time: subject.birth_time,
+      birth_time: normalizeBirthTime(subject.birth_time),
       gender: subject.gender,
       calendar_type: subject.calendar_type,
     }
@@ -420,11 +415,10 @@ export function useSajuApp() {
     if (
       !subject?.name ||
       !subject?.birth_date ||
-      !subject?.birth_time ||
       !subject?.gender ||
       !subject?.calendar_type
     ) {
-      throw new Error('이름, 생년월일, 시간, 성별, 양력/음력을 모두 입력해 주세요.')
+      throw new Error('이름, 생년월일, 성별, 양력/음력을 입력해 주세요.')
     }
 
     setError('')
@@ -443,7 +437,7 @@ export function useSajuApp() {
       const prompt = buildSajuPrompt({
         name: subject.name,
         birthDate: subject.birth_date,
-        birthTime: String(subject.birth_time).slice(0, 5),
+        birthTime: normalizeBirthTime(subject.birth_time) ?? '',
         gender: subject.gender,
         calendarType: subject.calendar_type,
         age: getAge(subject.birth_date),
@@ -691,7 +685,7 @@ export function useSajuApp() {
         {
           name: profile.name,
           birth_date: profile.birth_date,
-          birth_time: String(profile.birth_time).slice(0, 5),
+          birth_time: normalizeBirthTime(profile.birth_time),
           gender: profile.gender,
           calendar_type: profile.calendar_type,
         },

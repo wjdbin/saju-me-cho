@@ -1,13 +1,15 @@
 export const READING_SELECT =
   'id, name, birth_date, birth_time, gender, calendar_type, result, created_at, user_id, share_token, is_shared'
 
+export function normalizeBirthTime(value) {
+  if (value == null || value === '') return null
+  const time = String(value).slice(0, 5)
+  return /^\d{2}:\d{2}$/.test(time) ? time : null
+}
+
 export function isProfileComplete(profile) {
   return Boolean(
-    profile?.name &&
-      profile?.birth_date &&
-      profile?.birth_time &&
-      profile?.gender &&
-      profile?.calendar_type
+    profile?.name && profile?.birth_date && profile?.gender && profile?.calendar_type
   )
 }
 
@@ -15,7 +17,7 @@ export function emptyProfileForm(seed = {}) {
   return {
     name: seed.name ?? '',
     birth_date: seed.birth_date ?? '',
-    birth_time: seed.birth_time ? String(seed.birth_time).slice(0, 5) : '',
+    birth_time: normalizeBirthTime(seed.birth_time) ?? '',
     gender: seed.gender ?? '',
     calendar_type: seed.calendar_type ?? '',
   }
@@ -62,7 +64,7 @@ export function formatSubjectMeta(subject) {
   const age = getAge(subject.birth_date)
   return [
     subject.birth_date,
-    subject.birth_time ? String(subject.birth_time).slice(0, 5) : '',
+    normalizeBirthTime(subject.birth_time) || '시간 미상',
     genderLabel(subject.gender),
     calendarLabel(subject.calendar_type),
     age != null ? `만 ${age}세` : '',
