@@ -167,6 +167,31 @@ body {
   cursor: not-allowed;
 }
 
+.profile-btn {
+  display: block;
+  width: 100%;
+  margin: 0 0 1rem;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.profile-btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: #ececec;
+}
+
+.profile-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .sidebar {
   flex: 0 0 180px;
   padding: 1.25rem 1rem;
@@ -329,6 +354,203 @@ body {
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.35rem;
+}
+
+.profile-card {
+  margin-top: 1.25rem;
+  padding: 1.1rem 1.15rem;
+  text-align: left;
+  background: #fafafa;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.profile-card--empty {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.profile-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.profile-card-label {
+  margin: 0 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.profile-card-name {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.profile-card-meta {
+  margin: 0.55rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.profile-edit-link,
+.secondary-inline-btn {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+}
+
+.profile-edit-link {
+  padding: 0.35rem 0.65rem;
+}
+
+.secondary-inline-btn {
+  justify-self: start;
+  padding: 0.55rem 0.85rem;
+}
+
+.profile-edit-link:hover:not(:disabled),
+.secondary-inline-btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--bg);
+}
+
+.profile-edit-link:disabled,
+.secondary-inline-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(20, 20, 20, 0.45);
+}
+
+.modal-card {
+  width: min(100%, 440px);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1.5rem 1.35rem 1.4rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 2px);
+  text-align: left;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+.modal-eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.modal-card h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.modal-copy {
+  margin: 0.55rem 0 1rem;
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.modal-form label {
+  display: block;
+  width: 100%;
+  margin: 0.9rem 0 0.4rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.modal-form label:first-of-type {
+  margin-top: 0;
+}
+
+.modal-form input,
+.modal-form select {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  padding: 0.65rem 0.85rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.modal-form select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%231a1a1a' d='M1.4.6 6 5.2 10.6.6 12 2 6 8 0 2z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.9rem center;
+  padding-right: 2.4rem;
+}
+
+.modal-form input:focus,
+.modal-form select:focus {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.12);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.55rem;
+  margin-top: 1.35rem;
+}
+
+.modal-actions .analyze-btn {
+  flex: 1;
+}
+
+.modal-cancel-btn {
+  flex: 0 0 auto;
+  min-height: 52px;
+  padding: 0.85rem 1rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.modal-cancel-btn:hover:not(:disabled) {
+  background: var(--bg);
+}
+
+.modal-cancel-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* 입력 영역은 왼쪽 정렬(라벨·입력 가독성), 블록은 가운데 */

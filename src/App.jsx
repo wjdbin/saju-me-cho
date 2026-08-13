@@ -18,7 +18,6 @@ function getAge(birthDate) {
   return age
 }
 
-/** 성별/달력 라벨 */
 function genderLabel(gender) {
   if (gender === 'male') return '남자'
   if (gender === 'female') return '여자'
@@ -31,7 +30,38 @@ function calendarLabel(calendarType) {
   return calendarType || ''
 }
 
-/** OAuth 실패 시 URL에 실려 오는 에러를 읽습니다 */
+function isProfileComplete(profile) {
+  return Boolean(
+    profile?.name &&
+      profile?.birth_date &&
+      profile?.birth_time &&
+      profile?.gender &&
+      profile?.calendar_type
+  )
+}
+
+function emptyProfileForm(seed = {}) {
+  return {
+    name: seed.name ?? '',
+    birth_date: seed.birth_date ?? '',
+    birth_time: seed.birth_time ? String(seed.birth_time).slice(0, 5) : '',
+    gender: seed.gender ?? '',
+    calendar_type: seed.calendar_type ?? '',
+  }
+}
+
+function formatReadingLabel(createdAt) {
+  const date = new Date(createdAt)
+  if (Number.isNaN(date.getTime())) return '사주 기록'
+  return date.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function readOAuthErrorFromUrl() {
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const queryParams = new URLSearchParams(window.location.search)
@@ -45,7 +75,6 @@ function readOAuthErrorFromUrl() {
   return decodeURIComponent(description.replace(/\+/g, ' '))
 }
 
-/** 로그인 후 URL에 남은 code/error 파라미터를 정리합니다 */
 function clearAuthParamsFromUrl() {
   const url = new URL(window.location.href)
   const keys = ['code', 'state', 'error', 'error_code', 'error_description']
@@ -73,11 +102,16 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [authBusy, setAuthBusy] = useState(false)
 
-  const [name, setName] = useState('')
-  const [birthDate, setBirthDate] = useState('')
-  const [birthTime, setBirthTime] = useState('')
-  const [gender, setGender] = useState('')
-  const [calendarType, setCalendarType] = useState('')
+  const [profile, setProfile] = useState(null)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [profileModalMode, setProfileModalMode] = useState('onboarding')
+  const [profileForm, setProfileForm] = useState(emptyProfileForm())
+
+  const [newSajuModalOpen, setNewSajuModalOpen] = useState(false)
+  const [newSajuForm, setNewSajuForm] = useState(emptyProfileForm())
+  const [activeSubject, setActiveSubject] = useState(null)
 
   const [result, setResult] = useState('')
   const [loading, setLoading] = useState(false)
@@ -103,6 +137,47 @@ function App() {
     return session.user
   }
 
+  const openProfileModal = (mode, nextProfile = profile) => {
+    setProfileModalMode(mode)
+    setProfileForm(emptyProfileForm(nextProfile ?? {}))
+    setProfileModalOpen(true)
+  }
+
+  const loadProfile = async (userId) => {
+    setProfileLoading(true)
+
+    try {
+      requireSupabase()
+
+      const { data, error: fetchError } = await supabase
+        .from('users')
+        .select('id, name, birth_date, birth_time, gender, calendar_type, created_at, updated_at')
+        .eq('id', userId)
+        .maybeSingle()
+
+      if (fetchError) {
+        throw new Error(`프로필 불러오기 실패: ${fetchError.message}`)
+      }
+
+      setProfile(data)
+
+      if (!isProfileComplete(data)) {
+        openProfileModal('onboarding', data)
+      } else {
+        setProfileModalOpen(false)
+      }
+
+      return data
+    } catch (err) {
+      setError(err.message || '프로필을 불러오지 못했습니다.')
+      setProfile(null)
+      openProfileModal('onboarding')
+      return null
+    } finally {
+      setProfileLoading(false)
+    }
+  }
+
   const loadReadings = async () => {
     try {
       requireAuth()
@@ -114,7 +189,7 @@ function App() {
 
     const { data, error: fetchError } = await supabase
       .from('saju_readings')
-      .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at')
+      .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at, user_id')
       .order('created_at', { ascending: false })
 
     if (fetchError) {
@@ -167,6 +242,10 @@ function App() {
       }
       if (event === 'SIGNED_OUT') {
         setAuthBusy(false)
+        setProfile(null)
+        setProfileModalOpen(false)
+        setNewSajuModalOpen(false)
+        setActiveSubject(null)
       }
     })
 
@@ -183,10 +262,12 @@ function App() {
       setReadings([])
       setSelectedId(null)
       setResult('')
+      setProfile(null)
       return
     }
 
     setError('')
+    loadProfile(session.user.id)
     loadReadings()
   }, [session, authLoading])
 
@@ -226,17 +307,17 @@ function App() {
       if (signOutError) {
         throw signOutError
       }
-      handleNewSaju()
+      setSelectedId(null)
+      setResult('')
+      setActiveSubject(null)
+      setNewSajuModalOpen(false)
       setReadings([])
+      setProfile(null)
     } catch (err) {
       setError(err.message || '로그아웃 중 오류가 발생했습니다.')
     } finally {
       setAuthBusy(false)
     }
-  }
-
-  const handleNameChange = (e) => {
-    setName(e.target.value)
   }
 
   const showResult = (nextResult, options = {}) => {
@@ -254,50 +335,102 @@ function App() {
 
   const handleSelectReading = (reading) => {
     setSelectedId(reading.id)
-    setName(reading.name)
-    setBirthDate(reading.birth_date)
-    setBirthTime(String(reading.birth_time).slice(0, 5))
-    setGender(reading.gender)
-    setCalendarType(reading.calendar_type)
+    setActiveSubject({
+      name: reading.name,
+      birth_date: reading.birth_date,
+      birth_time: reading.birth_time,
+      gender: reading.gender,
+      calendar_type: reading.calendar_type,
+    })
     setError('')
     showResult(reading.result)
   }
 
   const handleNewSaju = () => {
     setSelectedId(null)
-    setName('')
-    setBirthDate('')
-    setBirthTime('')
-    setGender('')
-    setCalendarType('')
     setResult('')
     setError('')
-    requestAnimationFrame(() => {
-      document.getElementById('name')?.focus()
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    })
+    setActiveSubject(null)
+    setNewSajuForm(emptyProfileForm())
+    setNewSajuModalOpen(true)
   }
 
-  const readingPayload = (text, userId) => ({
-    name,
-    birth_date: birthDate,
-    birth_time: birthTime,
-    gender,
-    calendar_type: calendarType,
-    result: text,
-    user_id: userId,
-  })
+  const handleProfileFieldChange = (field) => (event) => {
+    setProfileForm((prev) => ({ ...prev, [field]: event.target.value }))
+  }
 
-  /** Create / Update — 선택 중이면 수정, 아니면 새로 저장 */
-  const saveReading = async (text) => {
+  const handleNewSajuFieldChange = (field) => (event) => {
+    setNewSajuForm((prev) => ({ ...prev, [field]: event.target.value }))
+  }
+
+  const saveProfile = async () => {
     const user = requireAuth()
+    const payload = {
+      id: user.id,
+      name: profileForm.name.trim(),
+      birth_date: profileForm.birth_date,
+      birth_time: profileForm.birth_time,
+      gender: profileForm.gender,
+      calendar_type: profileForm.calendar_type,
+    }
+
+    if (
+      !payload.name ||
+      !payload.birth_date ||
+      !payload.birth_time ||
+      !payload.gender ||
+      !payload.calendar_type
+    ) {
+      throw new Error('이름, 생년월일, 시간, 성별, 양력/음력을 모두 입력해 주세요.')
+    }
+
+    const { data, error: upsertError } = await supabase
+      .from('users')
+      .upsert(payload, { onConflict: 'id' })
+      .select('id, name, birth_date, birth_time, gender, calendar_type, created_at, updated_at')
+      .single()
+
+    if (upsertError) {
+      throw new Error(`프로필 저장 실패: ${upsertError.message}`)
+    }
+
+    setProfile(data)
+    setProfileModalOpen(false)
+    return data
+  }
+
+  const handleSaveProfile = async (event) => {
+    event.preventDefault()
+    setProfileSaving(true)
+    setError('')
+
+    try {
+      await saveProfile()
+    } catch (err) {
+      setError(err.message || '프로필 저장 중 오류가 발생했습니다.')
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
+  const saveReading = async (text, subject) => {
+    const user = requireAuth()
+    const payload = {
+      result: text,
+      user_id: user.id,
+      name: subject.name,
+      birth_date: subject.birth_date,
+      birth_time: subject.birth_time,
+      gender: subject.gender,
+      calendar_type: subject.calendar_type,
+    }
 
     if (selectedId) {
       const { data, error: updateError } = await supabase
         .from('saju_readings')
-        .update(readingPayload(text, user.id))
+        .update(payload)
         .eq('id', selectedId)
-        .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at')
+        .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at, user_id')
         .single()
 
       if (updateError) {
@@ -310,8 +443,8 @@ function App() {
 
     const { data, error: insertError } = await supabase
       .from('saju_readings')
-      .insert(readingPayload(text, user.id))
-      .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at')
+      .insert(payload)
+      .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at, user_id')
       .single()
 
     if (insertError) {
@@ -323,11 +456,51 @@ function App() {
     return data
   }
 
-  /** Delete — 사이드바 × 버튼으로만 삭제 */
+  const analyzeWithSubject = async (subject) => {
+    if (
+      !subject?.name ||
+      !subject?.birth_date ||
+      !subject?.birth_time ||
+      !subject?.gender ||
+      !subject?.calendar_type
+    ) {
+      throw new Error('이름, 생년월일, 시간, 성별, 양력/음력을 모두 입력해 주세요.')
+    }
+
+    setError('')
+    setResult('')
+    setLoading(true)
+    setActiveSubject(subject)
+
+    try {
+      const prompt = buildSajuPrompt({
+        name: subject.name,
+        birthDate: subject.birth_date,
+        birthTime: String(subject.birth_time).slice(0, 5),
+        gender: subject.gender,
+        calendarType: subject.calendar_type,
+        age: getAge(subject.birth_date),
+      })
+
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+      document.getElementById('saju-result')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+
+      const text = await askGemini(prompt)
+      showResult(text, { scroll: false })
+      await saveReading(text, subject)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleDelete = async (reading, event) => {
     event?.stopPropagation()
 
-    const ok = window.confirm(`"${reading.name}" 기록을 삭제할까요?`)
+    const label = reading.name || formatReadingLabel(reading.created_at)
+    const ok = window.confirm(`"${label}" 기록을 삭제할까요?`)
     if (!ok) return
 
     setError('')
@@ -347,7 +520,9 @@ function App() {
       setReadings((prev) => prev.filter((item) => item.id !== reading.id))
 
       if (selectedId === reading.id) {
-        handleNewSaju()
+        setSelectedId(null)
+        setResult('')
+        setActiveSubject(null)
       }
     } catch (err) {
       setError(err.message || '삭제 중 오류가 발생했습니다.')
@@ -355,47 +530,53 @@ function App() {
   }
 
   const handleAnalyze = async () => {
-    if (!name || !birthDate || !birthTime || !gender || !calendarType) {
-      setError('이름, 생년월일, 시간, 성별, 양력/음력을 모두 입력해 주세요.')
+    if (!isProfileComplete(profile)) {
+      openProfileModal('onboarding', profile)
+      setError('사주를 보려면 먼저 프로필 정보를 입력해 주세요.')
       return
     }
 
-    setError('')
-    setResult('')
-    setLoading(true)
-
     try {
-      const prompt = buildSajuPrompt({
-        name,
-        birthDate,
-        birthTime,
-        gender,
-        calendarType,
-        age: getAge(birthDate),
+      setSelectedId(null)
+      await analyzeWithSubject({
+        name: profile.name,
+        birth_date: profile.birth_date,
+        birth_time: String(profile.birth_time).slice(0, 5),
+        gender: profile.gender,
+        calendar_type: profile.calendar_type,
       })
-
-      await new Promise((resolve) => requestAnimationFrame(() => resolve()))
-      document.getElementById('saju-result')?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      })
-
-      const text = await askGemini(prompt)
-      showResult(text, { scroll: false })
-      await saveReading(text)
     } catch (err) {
       setError(err.message || '해석 요청 중 오류가 발생했습니다.')
-    } finally {
-      setLoading(false)
     }
   }
 
-  const busy = loading || authBusy
+  const handleSubmitNewSaju = async (event) => {
+    event.preventDefault()
+    setError('')
+
+    try {
+      setSelectedId(null)
+      setNewSajuModalOpen(false)
+      await analyzeWithSubject({
+        name: newSajuForm.name.trim(),
+        birth_date: newSajuForm.birth_date,
+        birth_time: newSajuForm.birth_time,
+        gender: newSajuForm.gender,
+        calendar_type: newSajuForm.calendar_type,
+      })
+    } catch (err) {
+      setNewSajuModalOpen(true)
+      setError(err.message || '해석 요청 중 오류가 발생했습니다.')
+    }
+  }
+
+  const busy = loading || authBusy || profileSaving || profileLoading
+  const profileReady = isProfileComplete(profile)
+  const displayName = profile?.name || session?.user?.user_metadata?.full_name || session?.user?.email || ''
   const userEmail = session?.user?.email ?? ''
-  const userName =
-    session?.user?.user_metadata?.full_name ||
-    session?.user?.user_metadata?.name ||
-    userEmail
+  const subject = activeSubject || (profileReady ? profile : null)
+  const subjectAge = subject?.birth_date ? getAge(subject.birth_date) : null
+  const profileAge = profileReady ? getAge(profile.birth_date) : null
 
   if (authLoading) {
     return (
@@ -431,20 +612,25 @@ function App() {
       <aside className="sidebar">
         <div className="auth-bar">
           <p className="auth-user" title={userEmail}>
-            {userName}
+            {displayName}
           </p>
-          <button
-            type="button"
-            className="signout-btn"
-            onClick={handleSignOut}
-            disabled={busy}
-          >
+          <button type="button" className="signout-btn" onClick={handleSignOut} disabled={busy}>
             로그아웃
           </button>
         </div>
+
+        <button
+          type="button"
+          className="profile-btn"
+          onClick={() => openProfileModal('edit', profile)}
+          disabled={busy}
+        >
+          프로필 수정
+        </button>
+
         <h2 className="sidebar-title">저장된 사주</h2>
         <button type="button" className="new-saju-btn" onClick={handleNewSaju} disabled={busy}>
-          새 사주 만들기
+          새 사주 보기
         </button>
         {readings.length === 0 ? (
           <p className="sidebar-empty">아직 저장된 기록이 없습니다.</p>
@@ -458,12 +644,12 @@ function App() {
                   onClick={() => handleSelectReading(reading)}
                   disabled={busy}
                 >
-                  {reading.name}
+                  {reading.name || formatReadingLabel(reading.created_at)}
                 </button>
                 <button
                   type="button"
                   className="sidebar-delete"
-                  aria-label={`${reading.name} 삭제`}
+                  aria-label={`${reading.name || formatReadingLabel(reading.created_at)} 삭제`}
                   title="삭제"
                   onClick={(event) => handleDelete(reading, event)}
                   disabled={busy}
@@ -478,77 +664,66 @@ function App() {
 
       <div className="app">
         <div className="app-header">
-          <h1>{selectedId ? '사주 수정' : '사주 입력'}</h1>
-          {(selectedId || name || result) && (
-            <button
-              type="button"
-              className="new-saju-btn new-saju-btn--ghost"
-              onClick={handleNewSaju}
-              disabled={busy}
-            >
-              새 사주 만들기
-            </button>
-          )}
+          <h1>{selectedId ? '저장된 사주' : '내 사주'}</h1>
+          <button
+            type="button"
+            className="new-saju-btn new-saju-btn--ghost"
+            onClick={handleNewSaju}
+            disabled={busy}
+          >
+            새 사주 보기
+          </button>
         </div>
 
-        <label htmlFor="name">이름</label>
-        <input
-          id="name"
-          type="text"
-          value={name}
-          onChange={handleNameChange}
-          placeholder="이름을 입력하세요"
-          disabled={busy}
-        />
-
-        <label htmlFor="birthDate">생년월일</label>
-        <input
-          id="birthDate"
-          type="date"
-          value={birthDate}
-          onChange={(e) => setBirthDate(e.target.value)}
-          disabled={busy}
-        />
-
-        <label htmlFor="birthTime">태어난 시간</label>
-        <input
-          id="birthTime"
-          type="time"
-          value={birthTime}
-          onChange={(e) => setBirthTime(e.target.value)}
-          disabled={busy}
-        />
-
-        <label htmlFor="gender">성별</label>
-        <select
-          id="gender"
-          value={gender}
-          onChange={(e) => setGender(e.target.value)}
-          disabled={busy}
-        >
-          <option value="">선택하세요</option>
-          <option value="male">남자</option>
-          <option value="female">여자</option>
-        </select>
-
-        <label htmlFor="calendarType">양력 / 음력</label>
-        <select
-          id="calendarType"
-          value={calendarType}
-          onChange={(e) => setCalendarType(e.target.value)}
-          disabled={busy}
-        >
-          <option value="">선택하세요</option>
-          <option value="solar">양력</option>
-          <option value="lunar">음력</option>
-        </select>
+        {profileReady ? (
+          <section className="profile-card">
+            <div className="profile-card-top">
+              <div>
+                <p className="profile-card-label">내 정보</p>
+                <h2 className="profile-card-name">{profile.name}</h2>
+              </div>
+              <button
+                type="button"
+                className="profile-edit-link"
+                onClick={() => openProfileModal('edit', profile)}
+                disabled={busy}
+              >
+                수정
+              </button>
+            </div>
+            <p className="profile-card-meta">
+              {[
+                profile.birth_date,
+                String(profile.birth_time).slice(0, 5),
+                genderLabel(profile.gender),
+                calendarLabel(profile.calendar_type),
+                profileAge != null ? `만 ${profileAge}세` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          </section>
+        ) : (
+          <section className="profile-card profile-card--empty">
+            <p className="profile-card-label">내 정보</p>
+            <p className="profile-card-meta">프로필을 입력하면 바로 사주를 볼 수 있어요.</p>
+            <button
+              type="button"
+              className="secondary-inline-btn"
+              onClick={() => openProfileModal('onboarding', profile)}
+              disabled={busy}
+            >
+              프로필 입력하기
+            </button>
+          </section>
+        )}
 
         <div className="action-row">
           <button
             type="button"
             className="analyze-btn"
             onClick={handleAnalyze}
-            disabled={busy}
+            disabled={busy || !profileReady}
           >
             {loading ? '🔮 풀이 중...' : '내 사주 보기'}
           </button>
@@ -588,14 +763,14 @@ function App() {
           <section id="saju-result" className="result" key={resultKey}>
             <header className="result-header">
               <p className="result-eyebrow">{selectedId ? '저장된 해석' : '해석 결과'}</p>
-              <h2 className="result-name">{name || '이름 없음'}</h2>
+              <h2 className="result-name">{subject?.name || '이름 없음'}</h2>
               <p className="result-meta">
                 {[
-                  birthDate,
-                  birthTime ? String(birthTime).slice(0, 5) : '',
-                  genderLabel(gender),
-                  calendarLabel(calendarType),
-                  getAge(birthDate) != null ? `만 ${getAge(birthDate)}세` : '',
+                  subject?.birth_date,
+                  subject?.birth_time ? String(subject.birth_time).slice(0, 5) : '',
+                  genderLabel(subject?.gender),
+                  calendarLabel(subject?.calendar_type),
+                  subjectAge != null ? `만 ${subjectAge}세` : '',
                 ]
                   .filter(Boolean)
                   .join(' · ')}
@@ -607,6 +782,208 @@ function App() {
           </section>
         )}
       </div>
+
+      {profileModalOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-modal-title"
+          >
+            <p className="modal-eyebrow">
+              {profileModalMode === 'onboarding' ? '처음 오신 분' : '프로필'}
+            </p>
+            <h2 id="profile-modal-title">
+              {profileModalMode === 'onboarding' ? '기본 정보를 입력해 주세요' : '프로필 수정'}
+            </h2>
+            <p className="modal-copy">
+              {profileModalMode === 'onboarding'
+                ? '한 번만 입력하면 다음부터는 바로 사주를 볼 수 있어요.'
+                : '변경한 정보는 이후 사주 풀이에 바로 반영됩니다.'}
+            </p>
+
+            <form className="modal-form" onSubmit={handleSaveProfile}>
+              <label htmlFor="profile-name">이름</label>
+              <input
+                id="profile-name"
+                type="text"
+                value={profileForm.name}
+                onChange={handleProfileFieldChange('name')}
+                placeholder="이름을 입력하세요"
+                disabled={profileSaving}
+                required
+              />
+
+              <label htmlFor="profile-birthDate">생년월일</label>
+              <input
+                id="profile-birthDate"
+                type="date"
+                value={profileForm.birth_date}
+                onChange={handleProfileFieldChange('birth_date')}
+                disabled={profileSaving}
+                required
+              />
+
+              <label htmlFor="profile-birthTime">태어난 시간</label>
+              <input
+                id="profile-birthTime"
+                type="time"
+                value={profileForm.birth_time}
+                onChange={handleProfileFieldChange('birth_time')}
+                disabled={profileSaving}
+                required
+              />
+
+              <label htmlFor="profile-gender">성별</label>
+              <select
+                id="profile-gender"
+                value={profileForm.gender}
+                onChange={handleProfileFieldChange('gender')}
+                disabled={profileSaving}
+                required
+              >
+                <option value="">선택하세요</option>
+                <option value="male">남자</option>
+                <option value="female">여자</option>
+              </select>
+
+              <label htmlFor="profile-calendarType">양력 / 음력</label>
+              <select
+                id="profile-calendarType"
+                value={profileForm.calendar_type}
+                onChange={handleProfileFieldChange('calendar_type')}
+                disabled={profileSaving}
+                required
+              >
+                <option value="">선택하세요</option>
+                <option value="solar">양력</option>
+                <option value="lunar">음력</option>
+              </select>
+
+              <div className="modal-actions">
+                {profileModalMode === 'edit' && profileReady && (
+                  <button
+                    type="button"
+                    className="modal-cancel-btn"
+                    onClick={() => setProfileModalOpen(false)}
+                    disabled={profileSaving}
+                  >
+                    취소
+                  </button>
+                )}
+                <button type="submit" className="analyze-btn" disabled={profileSaving}>
+                  {profileSaving
+                    ? '저장 중...'
+                    : profileModalMode === 'onboarding'
+                      ? '저장하고 시작하기'
+                      : '프로필 저장'}
+                </button>
+              </div>
+            </form>
+
+            {error && <p className="error">{error}</p>}
+          </div>
+        </div>
+      )}
+
+      {newSajuModalOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!loading) setNewSajuModalOpen(false)
+          }}
+        >
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-saju-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="modal-eyebrow">새 사주</p>
+            <h2 id="new-saju-modal-title">사주 정보 입력</h2>
+            <p className="modal-copy">다른 사람 정보로 새 사주를 풀이하고 저장할 수 있어요.</p>
+
+            <form className="modal-form" onSubmit={handleSubmitNewSaju}>
+              <label htmlFor="new-saju-name">이름</label>
+              <input
+                id="new-saju-name"
+                type="text"
+                value={newSajuForm.name}
+                onChange={handleNewSajuFieldChange('name')}
+                placeholder="이름을 입력하세요"
+                disabled={loading}
+                required
+                autoFocus
+              />
+
+              <label htmlFor="new-saju-birthDate">생년월일</label>
+              <input
+                id="new-saju-birthDate"
+                type="date"
+                value={newSajuForm.birth_date}
+                onChange={handleNewSajuFieldChange('birth_date')}
+                disabled={loading}
+                required
+              />
+
+              <label htmlFor="new-saju-birthTime">태어난 시간</label>
+              <input
+                id="new-saju-birthTime"
+                type="time"
+                value={newSajuForm.birth_time}
+                onChange={handleNewSajuFieldChange('birth_time')}
+                disabled={loading}
+                required
+              />
+
+              <label htmlFor="new-saju-gender">성별</label>
+              <select
+                id="new-saju-gender"
+                value={newSajuForm.gender}
+                onChange={handleNewSajuFieldChange('gender')}
+                disabled={loading}
+                required
+              >
+                <option value="">선택하세요</option>
+                <option value="male">남자</option>
+                <option value="female">여자</option>
+              </select>
+
+              <label htmlFor="new-saju-calendarType">양력 / 음력</label>
+              <select
+                id="new-saju-calendarType"
+                value={newSajuForm.calendar_type}
+                onChange={handleNewSajuFieldChange('calendar_type')}
+                disabled={loading}
+                required
+              >
+                <option value="">선택하세요</option>
+                <option value="solar">양력</option>
+                <option value="lunar">음력</option>
+              </select>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="modal-cancel-btn"
+                  onClick={() => setNewSajuModalOpen(false)}
+                  disabled={loading}
+                >
+                  취소
+                </button>
+                <button type="submit" className="analyze-btn" disabled={loading}>
+                  {loading ? '🔮 풀이 중...' : '풀이하고 저장'}
+                </button>
+              </div>
+            </form>
+
+            {error && <p className="error">{error}</p>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
