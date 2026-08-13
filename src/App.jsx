@@ -81,7 +81,6 @@ function App() {
 
   const [result, setResult] = useState('')
   const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const [readings, setReadings] = useState([])
@@ -324,30 +323,7 @@ function App() {
     return data
   }
 
-  /** Update — 현재 입력/결과만 다시 저장 (재해석 없이) */
-  const handleUpdate = async () => {
-    if (!selectedId) {
-      setError('수정할 기록을 사이드바에서 먼저 선택해 주세요.')
-      return
-    }
-    if (!name || !birthDate || !birthTime || !gender || !calendarType || !result) {
-      setError('이름, 생년월일, 시간, 성별, 양력/음력, 해석 결과가 모두 있어야 수정할 수 있습니다.')
-      return
-    }
-
-    setSaving(true)
-    setError('')
-
-    try {
-      await saveReading(result)
-    } catch (err) {
-      setError(err.message || '수정 중 오류가 발생했습니다.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  /** Delete */
+  /** Delete — 사이드바 × 버튼으로만 삭제 */
   const handleDelete = async (reading, event) => {
     event?.stopPropagation()
 
@@ -414,7 +390,7 @@ function App() {
     }
   }
 
-  const busy = loading || saving || authBusy
+  const busy = loading || authBusy
   const userEmail = session?.user?.email ?? ''
   const userName =
     session?.user?.user_metadata?.full_name ||
@@ -574,41 +550,8 @@ function App() {
             onClick={handleAnalyze}
             disabled={busy}
           >
-            {loading
-              ? '🔮 풀이 중...'
-              : selectedId
-                ? '다시 풀이하고 수정'
-                : '내 사주 보기'}
+            {loading ? '🔮 풀이 중...' : '내 사주 보기'}
           </button>
-
-          {selectedId && (
-            <>
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={handleUpdate}
-                disabled={busy || !result}
-              >
-                {saving ? '저장 중...' : '입력값 수정 저장'}
-              </button>
-              <button
-                type="button"
-                className="danger-btn"
-                onClick={(event) =>
-                  handleDelete(
-                    {
-                      id: selectedId,
-                      name: name || '이 기록',
-                    },
-                    event
-                  )
-                }
-                disabled={busy}
-              >
-                삭제
-              </button>
-            </>
-          )}
         </div>
 
         {error && <p className="error">{error}</p>}

@@ -407,43 +407,6 @@ body {
   margin-top: 1.75rem;
 }
 
-.secondary-btn,
-.danger-btn {
-  display: block;
-  width: 100%;
-  min-height: 46px;
-  padding: 0.7rem 1rem;
-  font: inherit;
-  font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.secondary-btn {
-  color: var(--ink);
-  background: #fff;
-  border: 1px solid var(--line-strong);
-}
-
-.secondary-btn:hover:not(:disabled) {
-  background: var(--bg);
-}
-
-.danger-btn {
-  color: #fff;
-  background: #3a3a3a;
-  border: 1px solid #3a3a3a;
-}
-
-.danger-btn:hover:not(:disabled) {
-  background: #222;
-}
-
-.secondary-btn:disabled,
-.danger-btn:disabled,
 .analyze-btn:disabled,
 .new-saju-btn:disabled {
   opacity: 0.45;
