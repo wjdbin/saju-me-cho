@@ -1,34 +1,72 @@
-import { useEffect, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { askGemini } from './gemini'
 import { buildSajuPrompt } from './sajuPrompt'
+import {
+  LOADING_MASCOT_SRC,
+  Mascot,
+  PawTrail,
+  SajuMarkdown,
+  calendarLabel,
+  genderLabel,
+  getAge,
+  getPreviewMarkdown,
+} from './sajuDisplay'
 import { isSupabaseConfigured, supabase } from './supabase'
 
-/** 생년월일로 만 나이를 계산합니다 */
-function getAge(birthDate) {
-  if (!birthDate) return null
-  const today = new Date()
-  const birth = new Date(birthDate)
-  let age = today.getFullYear() - birth.getFullYear()
-  const monthDiff = today.getMonth() - birth.getMonth()
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-    age -= 1
+const GUEST_READING_KEY = 'saju-me-guest-reading'
+const LOADING_STEP_MS = 850
+
+function buildLoadingSteps(subject) {
+  const [year, month, day] = String(subject.birth_date).split('-')
+  const time = String(subject.birth_time).slice(0, 5)
+  const monthNum = Number(month)
+  const dayNum = Number(day)
+  const name = subject.name || '너'
+
+  return [
+    `${name} 사주를 펼쳤다멍.`,
+    `${year}년생 확인했다멍.`,
+    `${monthNum}월 ${dayNum}일생 확인했다멍.`,
+    `${time} 태어난 시간 확인했다멍.`,
+    `${calendarLabel(subject.calendar_type)} · ${genderLabel(subject.gender)} 확인했다멍.`,
+    '년월일시 명식을 맞추고 있다멍.',
+    '오행 개수를 세고 있다멍.',
+    '십신·운성을 대조하고 있다멍.',
+    '구조를 쪼개고 있다멍. 감정은 배제하겠다멍.',
+  ]
+}
+
+function persistGuestReading(payload) {
+  try {
+    sessionStorage.setItem(GUEST_READING_KEY, JSON.stringify(payload))
+  } catch {
+    // ignore quota / private mode
   }
-  return age
 }
 
-function genderLabel(gender) {
-  if (gender === 'male') return '남자'
-  if (gender === 'female') return '여자'
-  return gender || ''
+function readGuestReading() {
+  try {
+    const raw = sessionStorage.getItem(GUEST_READING_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    return parsed
+  } catch {
+    return null
+  }
 }
 
-function calendarLabel(calendarType) {
-  if (calendarType === 'solar') return '양력'
-  if (calendarType === 'lunar') return '음력'
-  return calendarType || ''
+function clearGuestReading() {
+  try {
+    sessionStorage.removeItem(GUEST_READING_KEY)
+  } catch {
+    // ignore
+  }
 }
+
+const READING_SELECT =
+  'id, name, birth_date, birth_time, gender, calendar_type, result, created_at, user_id, share_token, is_shared'
 
 function isProfileComplete(profile) {
   return Boolean(
@@ -115,11 +153,17 @@ function App() {
 
   const [result, setResult] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingSteps, setLoadingSteps] = useState([])
+  const [loadingStepIndex, setLoadingStepIndex] = useState(0)
   const [error, setError] = useState('')
 
   const [readings, setReadings] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [resultKey, setResultKey] = useState(0)
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shareFeedback, setShareFeedback] = useState('')
+  const [readingCount, setReadingCount] = useState(null)
+  const guestAdoptInFlight = useRef(false)
 
   const requireSupabase = () => {
     if (!isSupabaseConfigured || !supabase) {
@@ -143,7 +187,7 @@ function App() {
     setProfileModalOpen(true)
   }
 
-  const loadProfile = async (userId) => {
+  const loadProfile = async (userId, { openOnboarding = true } = {}) => {
     setProfileLoading(true)
 
     try {
@@ -162,7 +206,7 @@ function App() {
       setProfile(data)
 
       if (!isProfileComplete(data)) {
-        openProfileModal('onboarding', data)
+        if (openOnboarding) openProfileModal('onboarding', data)
       } else {
         setProfileModalOpen(false)
       }
@@ -171,7 +215,7 @@ function App() {
     } catch (err) {
       setError(err.message || '프로필을 불러오지 못했습니다.')
       setProfile(null)
-      openProfileModal('onboarding')
+      if (openOnboarding) openProfileModal('onboarding')
       return null
     } finally {
       setProfileLoading(false)
@@ -189,7 +233,7 @@ function App() {
 
     const { data, error: fetchError } = await supabase
       .from('saju_readings')
-      .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at, user_id')
+      .select(READING_SELECT)
       .order('created_at', { ascending: false })
 
     if (fetchError) {
@@ -256,22 +300,37 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (authLoading) return
+    if (!isSupabaseConfigured || !supabase) return
 
-    if (!session?.user) {
-      setReadings([])
-      setSelectedId(null)
-      setResult('')
-      setProfile(null)
-      return
+    let cancelled = false
+
+    supabase.rpc('saju_reading_count').then(({ data, error: countError }) => {
+      if (cancelled || countError) return
+      const nextCount = Number(data)
+      if (Number.isFinite(nextCount)) {
+        setReadingCount(nextCount)
+      }
+    })
+
+    return () => {
+      cancelled = true
     }
-
-    setError('')
-    loadProfile(session.user.id)
-    loadReadings()
-  }, [session, authLoading])
+  }, [])
 
   const handleGoogleSignIn = async () => {
+    const guestSubject =
+      activeSubject ||
+      (isProfileComplete({ ...newSajuForm, name: newSajuForm.name.trim() })
+        ? { ...newSajuForm, name: newSajuForm.name.trim() }
+        : null)
+
+    if (result || guestSubject) {
+      persistGuestReading({
+        result: result || '',
+        subject: guestSubject,
+      })
+    }
+
     setError('')
     setAuthBusy(true)
 
@@ -343,6 +402,7 @@ function App() {
       calendar_type: reading.calendar_type,
     })
     setError('')
+    setShareFeedback('')
     showResult(reading.result)
   }
 
@@ -350,9 +410,13 @@ function App() {
     setSelectedId(null)
     setResult('')
     setError('')
+    setShareFeedback('')
     setActiveSubject(null)
     setNewSajuForm(emptyProfileForm())
-    setNewSajuModalOpen(true)
+    clearGuestReading()
+    if (session?.user) {
+      setNewSajuModalOpen(true)
+    }
   }
 
   const handleProfileFieldChange = (field) => (event) => {
@@ -363,15 +427,14 @@ function App() {
     setNewSajuForm((prev) => ({ ...prev, [field]: event.target.value }))
   }
 
-  const saveProfile = async () => {
-    const user = requireAuth()
+  const upsertUserProfile = async (userId, subject) => {
     const payload = {
-      id: user.id,
-      name: profileForm.name.trim(),
-      birth_date: profileForm.birth_date,
-      birth_time: profileForm.birth_time,
-      gender: profileForm.gender,
-      calendar_type: profileForm.calendar_type,
+      id: userId,
+      name: String(subject.name || '').trim(),
+      birth_date: subject.birth_date,
+      birth_time: String(subject.birth_time || '').slice(0, 5),
+      gender: subject.gender,
+      calendar_type: subject.calendar_type,
     }
 
     if (
@@ -397,6 +460,11 @@ function App() {
     setProfile(data)
     setProfileModalOpen(false)
     return data
+  }
+
+  const saveProfile = async () => {
+    const user = requireAuth()
+    return upsertUserProfile(user.id, profileForm)
   }
 
   const handleSaveProfile = async (event) => {
@@ -430,7 +498,7 @@ function App() {
         .from('saju_readings')
         .update(payload)
         .eq('id', selectedId)
-        .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at, user_id')
+        .select(READING_SELECT)
         .single()
 
       if (updateError) {
@@ -444,7 +512,7 @@ function App() {
     const { data, error: insertError } = await supabase
       .from('saju_readings')
       .insert(payload)
-      .select('id, name, birth_date, birth_time, gender, calendar_type, result, created_at, user_id')
+      .select(READING_SELECT)
       .single()
 
     if (insertError) {
@@ -468,7 +536,10 @@ function App() {
     }
 
     setError('')
+    setShareFeedback('')
     setResult('')
+    setLoadingSteps(buildLoadingSteps(subject))
+    setLoadingStepIndex(0)
     setLoading(true)
     setActiveSubject(subject)
 
@@ -490,11 +561,95 @@ function App() {
 
       const text = await askGemini(prompt)
       showResult(text, { scroll: false })
-      await saveReading(text, subject)
+      if (session?.user) {
+        await saveReading(text, subject)
+      } else {
+        persistGuestReading({ result: text, subject })
+      }
     } finally {
       setLoading(false)
+      setLoadingSteps([])
+      setLoadingStepIndex(0)
     }
   }
+
+  useEffect(() => {
+    if (!loading || loadingSteps.length === 0) return undefined
+
+    const timer = window.setInterval(() => {
+      setLoadingStepIndex((prev) => Math.min(prev + 1, loadingSteps.length - 1))
+    }, LOADING_STEP_MS)
+
+    return () => window.clearInterval(timer)
+  }, [loading, loadingSteps.length])
+
+  useEffect(() => {
+    if (authLoading) return
+
+    if (!session?.user) {
+      guestAdoptInFlight.current = false
+      setReadings([])
+      setSelectedId(null)
+      setProfile(null)
+
+      const guest = readGuestReading()
+      if (guest?.result) {
+        setActiveSubject(guest.subject ?? null)
+        setResult(guest.result)
+        if (guest.subject) {
+          setNewSajuForm(emptyProfileForm(guest.subject))
+        }
+      }
+      return
+    }
+
+    let cancelled = false
+
+    const adoptGuestReading = async () => {
+      const guest = readGuestReading()
+      const canAdoptProfile = Boolean(guest?.subject && isProfileComplete(guest.subject))
+
+      const loadedProfile = await loadProfile(session.user.id, {
+        openOnboarding: !canAdoptProfile,
+      })
+      if (cancelled) return
+      await loadReadings()
+      if (cancelled) return
+
+      if (!isProfileComplete(loadedProfile) && canAdoptProfile) {
+        try {
+          await upsertUserProfile(session.user.id, guest.subject)
+        } catch {
+          openProfileModal('onboarding', loadedProfile)
+        }
+      }
+
+      if (!guest?.result || guestAdoptInFlight.current) return
+
+      guestAdoptInFlight.current = true
+      setSelectedId(null)
+      setActiveSubject(guest.subject ?? null)
+      showResult(guest.result, { scroll: false })
+
+      try {
+        await saveReading(guest.result, guest.subject)
+        clearGuestReading()
+      } catch (err) {
+        guestAdoptInFlight.current = false
+        persistGuestReading(guest)
+        if (!cancelled) {
+          setError(err.message || '결과 저장에 실패했다멍.')
+        }
+      }
+    }
+
+    setError('')
+    adoptGuestReading()
+
+    return () => {
+      cancelled = true
+    }
+  }, [session, authLoading])
 
   const handleDelete = async (reading, event) => {
     event?.stopPropagation()
@@ -526,6 +681,84 @@ function App() {
       }
     } catch (err) {
       setError(err.message || '삭제 중 오류가 발생했습니다.')
+    }
+  }
+
+  const getShareUrl = (shareToken) => `${window.location.origin}/result/${shareToken}`
+
+  const copyShareLink = async (url) => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url)
+      return
+    }
+
+    const input = document.createElement('input')
+    input.value = url
+    document.body.appendChild(input)
+    input.select()
+    document.execCommand('copy')
+    document.body.removeChild(input)
+  }
+
+  const handleShare = async () => {
+    if (!selectedId) {
+      setError('저장이 끝난 뒤에 공유할 수 있다멍.')
+      return
+    }
+
+    const current = readings.find((item) => item.id === selectedId)
+    if (!current?.share_token) {
+      setError('공유 링크를 만들지 못했다멍. 기록을 다시 열어 주세요.')
+      return
+    }
+
+    setShareBusy(true)
+    setShareFeedback('')
+    setError('')
+
+    try {
+      requireAuth()
+
+      let shareToken = current.share_token
+      let nextReading = current
+
+      if (!current.is_shared) {
+        const { data, error: updateError } = await supabase
+          .from('saju_readings')
+          .update({ is_shared: true })
+          .eq('id', selectedId)
+          .select(READING_SELECT)
+          .single()
+
+        if (updateError) {
+          throw new Error(`공유 설정 실패: ${updateError.message}`)
+        }
+
+        nextReading = data
+        shareToken = data.share_token
+        setReadings((prev) => prev.map((item) => (item.id === data.id ? data : item)))
+      }
+
+      const url = getShareUrl(shareToken)
+      const shareTitle = `${nextReading.name || '멍사주'} 결과`
+      const shareText = `${nextReading.name || '친구'}의 멍사주 결과다멍.`
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: shareTitle, text: shareText, url })
+          setShareFeedback('공유했다멍.')
+          return
+        } catch (shareErr) {
+          if (shareErr?.name === 'AbortError') return
+        }
+      }
+
+      await copyShareLink(url)
+      setShareFeedback('링크를 복사했다멍. 친구에게 붙여넣기 하면 된다멍.')
+    } catch (err) {
+      setError(err.message || '공유 중 오류가 발생했다멍.')
+    } finally {
+      setShareBusy(false)
     }
   }
 
@@ -570,45 +803,59 @@ function App() {
     }
   }
 
-  const busy = loading || authBusy || profileSaving || profileLoading
+  const handleSubmitGuestSaju = async (event) => {
+    event.preventDefault()
+    setError('')
+
+    try {
+      setSelectedId(null)
+      await analyzeWithSubject({
+        name: newSajuForm.name.trim(),
+        birth_date: newSajuForm.birth_date,
+        birth_time: newSajuForm.birth_time,
+        gender: newSajuForm.gender,
+        calendar_type: newSajuForm.calendar_type,
+      })
+    } catch (err) {
+      setError(err.message || '해석 요청 중 오류가 발생했습니다.')
+    }
+  }
+
+  const busy = loading || authBusy || profileSaving || profileLoading || shareBusy
+  const isLoggedIn = Boolean(session?.user)
+  const isResultLocked = Boolean(!isLoggedIn && result)
+  const displayedResult = isResultLocked ? getPreviewMarkdown(result) : result
   const profileReady = isProfileComplete(profile)
   const displayName = profile?.name || session?.user?.user_metadata?.full_name || session?.user?.email || ''
   const userEmail = session?.user?.email ?? ''
   const subject = activeSubject || (profileReady ? profile : null)
   const subjectAge = subject?.birth_date ? getAge(subject.birth_date) : null
   const profileAge = profileReady ? getAge(profile.birth_date) : null
+  const selectedReading = selectedId ? readings.find((item) => item.id === selectedId) : null
+  const showGuestForm = !isLoggedIn && !loading && !result
 
   if (authLoading) {
     return (
       <div className="auth-screen">
-        <p className="auth-status">로그인 상태 확인 중...</p>
-      </div>
-    )
-  }
-
-  if (!session?.user) {
-    return (
-      <div className="auth-screen">
-        <div className="auth-card">
-          <p className="auth-eyebrow">saju-me</p>
-          <h1>사주 입력</h1>
-          <p className="auth-copy">Google 계정으로 로그인한 뒤 내 사주를 저장하고 관리하세요.</p>
-          <button
-            type="button"
-            className="google-btn"
-            onClick={handleGoogleSignIn}
-            disabled={authBusy || !isSupabaseConfigured}
-          >
-            {authBusy ? 'Google로 이동 중...' : 'Google로 계속하기'}
-          </button>
-          {error && <p className="error">{error}</p>}
-        </div>
+        <p className="auth-status">불러오는 중이다멍...</p>
       </div>
     )
   }
 
   return (
-    <div className="layout">
+    <div className="page">
+      <header className="mascot-hero">
+        <Mascot className="mascot--hero" />
+        <p className="mascot-hero-name">멍사주</p>
+        <p className="mascot-hero-copy">
+          {isLoggedIn
+            ? '사실대로 말해주겠다멍.'
+            : '사실대로 말해주겠다멍. 생년월일을 넣고 들어보라멍.'}
+        </p>
+      </header>
+
+      <div className={`layout${isLoggedIn ? '' : ' layout--guest'}`}>
+      {isLoggedIn && (
       <aside className="sidebar">
         <div className="auth-bar">
           <p className="auth-user" title={userEmail}>
@@ -628,7 +875,7 @@ function App() {
           프로필 수정
         </button>
 
-        <h2 className="sidebar-title">저장된 사주</h2>
+        <h2 className="sidebar-title">멍사주 기록</h2>
         <button type="button" className="new-saju-btn" onClick={handleNewSaju} disabled={busy}>
           새 사주 보기
         </button>
@@ -661,129 +908,298 @@ function App() {
           </ul>
         )}
       </aside>
+      )}
 
       <div className="app">
         <div className="app-header">
           <h1>{selectedId ? '저장된 사주' : '내 사주'}</h1>
-          <button
-            type="button"
-            className="new-saju-btn new-saju-btn--ghost"
-            onClick={handleNewSaju}
-            disabled={busy}
-          >
-            새 사주 보기
-          </button>
-        </div>
-
-        {profileReady ? (
-          <section className="profile-card">
-            <div className="profile-card-top">
-              <div>
-                <p className="profile-card-label">내 정보</p>
-                <h2 className="profile-card-name">{profile.name}</h2>
-              </div>
-              <button
-                type="button"
-                className="profile-edit-link"
-                onClick={() => openProfileModal('edit', profile)}
-                disabled={busy}
-              >
-                수정
-              </button>
-            </div>
-            <p className="profile-card-meta">
-              {[
-                profile.birth_date,
-                String(profile.birth_time).slice(0, 5),
-                genderLabel(profile.gender),
-                calendarLabel(profile.calendar_type),
-                profileAge != null ? `만 ${profileAge}세` : '',
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </p>
-          </section>
-        ) : (
-          <section className="profile-card profile-card--empty">
-            <p className="profile-card-label">내 정보</p>
-            <p className="profile-card-meta">프로필을 입력하면 바로 사주를 볼 수 있어요.</p>
+          {isLoggedIn ? (
             <button
               type="button"
-              className="secondary-inline-btn"
-              onClick={() => openProfileModal('onboarding', profile)}
+              className="new-saju-btn new-saju-btn--ghost"
+              onClick={handleNewSaju}
               disabled={busy}
             >
-              프로필 입력하기
+              새 사주 보기
             </button>
-          </section>
-        )}
-
-        <div className="action-row">
-          <button
-            type="button"
-            className="analyze-btn"
-            onClick={handleAnalyze}
-            disabled={busy || !profileReady}
-          >
-            {loading ? '🔮 풀이 중...' : '내 사주 보기'}
-          </button>
+          ) : (
+            <div className="app-header-actions">
+              {(result || loading) && (
+                <button
+                  type="button"
+                  className="new-saju-btn new-saju-btn--ghost"
+                  onClick={handleNewSaju}
+                  disabled={busy}
+                >
+                  다른 사주 보기
+                </button>
+              )}
+              <button
+                type="button"
+                className="new-saju-btn new-saju-btn--ghost"
+                onClick={handleGoogleSignIn}
+                disabled={authBusy || !isSupabaseConfigured}
+              >
+                {authBusy ? '이동 중...' : '로그인'}
+              </button>
+            </div>
+          )}
         </div>
+
+        {isLoggedIn ? (
+          <>
+            {profileReady ? (
+              <section className="profile-card">
+                <div className="profile-card-top">
+                  <div>
+                    <p className="profile-card-label">내 정보</p>
+                    <h2 className="profile-card-name">{profile.name}</h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="profile-edit-link"
+                    onClick={() => openProfileModal('edit', profile)}
+                    disabled={busy}
+                  >
+                    수정
+                  </button>
+                </div>
+                <p className="profile-card-meta">
+                  {[
+                    profile.birth_date,
+                    String(profile.birth_time).slice(0, 5),
+                    genderLabel(profile.gender),
+                    calendarLabel(profile.calendar_type),
+                    profileAge != null ? `만 ${profileAge}세` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              </section>
+            ) : (
+              <section className="profile-card profile-card--empty">
+                <p className="profile-card-label">내 정보</p>
+                <p className="profile-card-meta">프로필을 입력하면 바로 사주를 볼 수 있어요.</p>
+                <button
+                  type="button"
+                  className="secondary-inline-btn"
+                  onClick={() => openProfileModal('onboarding', profile)}
+                  disabled={busy}
+                >
+                  프로필 입력하기
+                </button>
+              </section>
+            )}
+
+            <div className="action-row">
+              <button
+                type="button"
+                className="analyze-btn"
+                onClick={handleAnalyze}
+                disabled={busy || !profileReady}
+              >
+                {loading ? '분석 중이다멍...' : '내 사주 보기'}
+              </button>
+            </div>
+          </>
+        ) : showGuestForm ? (
+          <form className="guest-form" onSubmit={handleSubmitGuestSaju}>
+            <p className="guest-form-copy">이름과 생년월일을 넣으면 바로 풀어주겠다멍.</p>
+
+            <label htmlFor="guest-name">이름</label>
+            <input
+              id="guest-name"
+              type="text"
+              value={newSajuForm.name}
+              onChange={handleNewSajuFieldChange('name')}
+              placeholder="이름을 입력하세요"
+              disabled={loading}
+              required
+              autoFocus
+            />
+
+            <label htmlFor="guest-birthDate">생년월일</label>
+            <input
+              id="guest-birthDate"
+              type="date"
+              value={newSajuForm.birth_date}
+              onChange={handleNewSajuFieldChange('birth_date')}
+              disabled={loading}
+              required
+            />
+
+            <label htmlFor="guest-birthTime">태어난 시간</label>
+            <input
+              id="guest-birthTime"
+              type="time"
+              value={newSajuForm.birth_time}
+              onChange={handleNewSajuFieldChange('birth_time')}
+              disabled={loading}
+              required
+            />
+
+            <label htmlFor="guest-gender">성별</label>
+            <select
+              id="guest-gender"
+              value={newSajuForm.gender}
+              onChange={handleNewSajuFieldChange('gender')}
+              disabled={loading}
+              required
+            >
+              <option value="">선택하세요</option>
+              <option value="male">남자</option>
+              <option value="female">여자</option>
+            </select>
+
+            <label htmlFor="guest-calendarType">양력 / 음력</label>
+            <select
+              id="guest-calendarType"
+              value={newSajuForm.calendar_type}
+              onChange={handleNewSajuFieldChange('calendar_type')}
+              disabled={loading}
+              required
+            >
+              <option value="">선택하세요</option>
+              <option value="solar">양력</option>
+              <option value="lunar">음력</option>
+            </select>
+
+            <div className="action-row">
+              <button type="submit" className="analyze-btn" disabled={busy}>
+                {loading ? '분석 중이다멍...' : '내 사주 보기'}
+              </button>
+              {readingCount > 0 && (
+                <p className="guest-form-stat">
+                  지금까지 총 <strong>{readingCount.toLocaleString('ko-KR')}</strong>개의 사주가
+                  생성됐다멍.
+                </p>
+              )}
+            </div>
+          </form>
+        ) : (
+          subject && (
+            <section className="profile-card">
+              <div className="profile-card-top">
+                <div>
+                  <p className="profile-card-label">지금 보는 사주</p>
+                  <h2 className="profile-card-name">{subject.name}</h2>
+                </div>
+                <button
+                  type="button"
+                  className="profile-edit-link"
+                  onClick={handleNewSaju}
+                  disabled={busy}
+                >
+                  다시 입력
+                </button>
+              </div>
+              <p className="profile-card-meta">
+                {[
+                  subject.birth_date,
+                  subject.birth_time ? String(subject.birth_time).slice(0, 5) : '',
+                  genderLabel(subject.gender),
+                  calendarLabel(subject.calendar_type),
+                  subjectAge != null ? `만 ${subjectAge}세` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            </section>
+          )
+        )}
 
         {error && <p className="error">{error}</p>}
 
         {loading && (
           <section
             id="saju-result"
-            className="skeleton-panel"
+            className="loading-panel"
             aria-busy="true"
             aria-live="polite"
           >
-            <div className="skeleton-panel-header">
-              <span className="skeleton-bone skeleton-bone--eyebrow" />
-              <span className="skeleton-bone skeleton-bone--title" />
-              <span className="skeleton-bone skeleton-bone--meta" />
-            </div>
-            <div className="skeleton-panel-body">
-              <span className="skeleton-bone skeleton-bone--heading" />
-              <span className="skeleton-bone" />
-              <span className="skeleton-bone" />
-              <span className="skeleton-bone skeleton-bone--short" />
-              <span className="skeleton-bone skeleton-bone--heading" />
-              <span className="skeleton-bone" />
-              <span className="skeleton-bone" />
-              <span className="skeleton-bone skeleton-bone--mid" />
-              <span className="skeleton-bone" />
-              <span className="skeleton-bone skeleton-bone--short" />
-            </div>
-            <p className="skeleton-status">사주를 풀이하고 있어요...</p>
+            <PawTrail className="paw-trail--loading" />
+            <Mascot
+              src={LOADING_MASCOT_SRC}
+              className="mascot--loading"
+              alt="사주 보는 중"
+            />
+            <PawTrail className="paw-trail--loading paw-trail--loading-bottom" />
+            <p className="loading-eyebrow">사주 보는 중이다멍</p>
+            <p className="loading-status" key={loadingStepIndex}>
+              {loadingSteps[loadingStepIndex] || '구조를 쪼개고 있다멍.'}
+            </p>
           </section>
         )}
 
         {!loading && result && (
           <section id="saju-result" className="result" key={resultKey}>
             <header className="result-header">
-              <p className="result-eyebrow">{selectedId ? '저장된 해석' : '해석 결과'}</p>
-              <h2 className="result-name">{subject?.name || '이름 없음'}</h2>
-              <p className="result-meta">
-                {[
-                  subject?.birth_date,
-                  subject?.birth_time ? String(subject.birth_time).slice(0, 5) : '',
-                  genderLabel(subject?.gender),
-                  calendarLabel(subject?.calendar_type),
-                  subjectAge != null ? `만 ${subjectAge}세` : '',
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
+              <div className="result-mascot-row">
+                <Mascot className="mascot--result" />
+                <div className="result-header-copy">
+                  <p className="result-eyebrow">
+                    {selectedId ? '멍사주 저장본' : '멍사주 해석'}
+                  </p>
+                  <h2 className="result-name">{subject?.name || '이름 없음'}</h2>
+                  <p className="result-meta">
+                    {[
+                      subject?.birth_date,
+                      subject?.birth_time ? String(subject.birth_time).slice(0, 5) : '',
+                      genderLabel(subject?.gender),
+                      calendarLabel(subject?.calendar_type),
+                      subjectAge != null ? `만 ${subjectAge}세` : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                </div>
+              </div>
+              {selectedId && (
+                <div className="result-share">
+                  <button
+                    type="button"
+                    className="share-btn"
+                    onClick={handleShare}
+                    disabled={shareBusy}
+                  >
+                    {shareBusy
+                      ? '공유 준비 중...'
+                      : selectedReading?.is_shared
+                        ? '공유 링크 복사'
+                        : '친구에게 공유'}
+                  </button>
+                  {shareFeedback && <p className="share-feedback">{shareFeedback}</p>}
+                </div>
+              )}
             </header>
-            <div className="result-text">
-              <ReactMarkdown>{result}</ReactMarkdown>
+            <div className={`result-text${isResultLocked ? ' result-text--locked' : ''}`}>
+              <SajuMarkdown markdown={displayedResult} />
+              {isResultLocked && (
+                <div className="result-lock">
+                  <div className="result-lock-card">
+                    <Mascot className="mascot--lock" />
+                    <p className="result-lock-copy">
+                      여기까지가 무료다멍. 나머지 해석을 보려면 로그인하라멍.
+                    </p>
+                    <button
+                      type="button"
+                      className="google-btn"
+                      onClick={handleGoogleSignIn}
+                      disabled={authBusy || !isSupabaseConfigured}
+                    >
+                      {authBusy ? 'Google로 이동 중...' : 'Google로 계속하기'}
+                    </button>
+                    <p className="result-lock-hint">로그인하면 전체 해석이 저장된다멍.</p>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         )}
       </div>
+      </div>
 
-      {profileModalOpen && (
+      {isLoggedIn && profileModalOpen && (
         <div className="modal-backdrop" role="presentation">
           <div
             className="modal-card"
@@ -799,8 +1215,8 @@ function App() {
             </h2>
             <p className="modal-copy">
               {profileModalMode === 'onboarding'
-                ? '한 번만 입력하면 다음부터는 바로 사주를 볼 수 있어요.'
-                : '변경한 정보는 이후 사주 풀이에 바로 반영됩니다.'}
+                ? '한 번만 입력하면 다음부터 바로 분석하겠다멍.'
+                : '바꾼 정보는 다음 분석부터 반영하겠다멍.'}
             </p>
 
             <form className="modal-form" onSubmit={handleSaveProfile}>
@@ -887,7 +1303,7 @@ function App() {
         </div>
       )}
 
-      {newSajuModalOpen && (
+      {isLoggedIn && newSajuModalOpen && (
         <div
           className="modal-backdrop"
           role="presentation"
@@ -975,7 +1391,7 @@ function App() {
                   취소
                 </button>
                 <button type="submit" className="analyze-btn" disabled={loading}>
-                  {loading ? '🔮 풀이 중...' : '풀이하고 저장'}
+                  {loading ? '분석 중이다멍...' : '풀이하고 저장'}
                 </button>
               </div>
             </form>
