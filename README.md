@@ -15,6 +15,7 @@
 - 결과 공유 링크 (`/result/:shareToken`) — 로그인 없이 열람
 - 사이드바 기록 목록 / 삭제
 - SEO (OG, sitemap, robots) + Google Search Console 인증 파일
+- Google Analytics 4 (페이지뷰, 사주 생성·로그인·공유 등 전환 이벤트)
 
 ## 기술 스택
 
@@ -22,6 +23,7 @@
 - React Router
 - Supabase (Auth, Postgres, RLS)
 - Gemini API (`fetch`, 모델 폴백)
+- Google Analytics 4 (`gtag.js`)
 - react-markdown + remark-gfm
 
 ## 시작하기
@@ -44,15 +46,16 @@ cp .env.example .env
 
 ```env
 VITE_GEMINI_API_KEY=your_api_key_here
-# optional
-# VITE_GEMINI_MODEL=gemini-2.5-flash-lite
+# optional preferred model (others are tried automatically on 404/429)
+# VITE_GEMINI_MODEL=gemini-3.5-flash
 
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_anon_or_publishable_key_here
 ```
 
 - Gemini 키: [Google AI Studio](https://aistudio.google.com/apikey)
-- 기본 모델: `gemini-3.6-flash` (할당량 초과 시 `2.5-flash-lite` → `2.0-flash` 등 자동 시도)
+- 기본 모델: `gemini-3.6-flash` (404/429이면 `3.5-flash` → `3.5-flash-lite` → `2.5-flash` 등으로 자동 시도)
+- GA Measurement ID는 `index.html` / `src/lib/analytics.js`에 `G-F9F1R3X4FR`로 들어가 있습니다. 환경 변수는 필요 없습니다.
 
 ### 3. Supabase / Google OAuth
 
@@ -103,12 +106,13 @@ src/
   main.jsx
   pages/                  HomePage, ResultPage
   components/
+    analytics/            GA 페이지뷰
     brand/                마스코트·히어로
     navigation/           헤더·사이드바
     profile/              프로필 카드·모달·입력 필드
     saju/                 입력·로딩·결과·공유 결과
   hooks/useSajuApp.js
-  lib/
+  lib/                    Gemini, Supabase, GA 이벤트
   styles/
 ```
 
