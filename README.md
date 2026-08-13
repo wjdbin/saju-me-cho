@@ -99,17 +99,17 @@ Vercel SPA rewrite는 `vercel.json`에 있습니다.
 
 ```text
 src/
-  App.jsx          # 메인 UI (로그인, 프로필, 분석, 공유, 로딩)
-  ResultPage.jsx   # 공개 공유 결과 페이지
-  sajuDisplay.jsx  # 마스코트·결과 마크다운 공용 컴포넌트
-  sajuPrompt.js    # 멍사주 해석 프롬프트
-  gemini.js        # Gemini 호출 + 모델 폴백
-  supabase.js      # Supabase 클라이언트
-  App.css          # 스타일
-public/
-  og.png           # OG 이미지
-  assets/images/   # 마스코트 이미지
-  robots.txt, sitemap.xml, site.webmanifest
+  App.jsx
+  main.jsx
+  pages/                  HomePage, ResultPage
+  components/
+    brand/                마스코트·히어로
+    navigation/           헤더·사이드바
+    profile/              프로필 카드·모달·입력 필드
+    saju/                 입력·로딩·결과·공유 결과
+  hooks/useSajuApp.js
+  lib/
+  styles/
 ```
 
 ## License

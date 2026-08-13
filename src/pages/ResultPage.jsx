@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { isSupabaseConfigured, supabase } from './supabase'
-import { Mascot, SajuResultView } from './sajuDisplay'
-import './App.css'
+import { MascotHero } from '../components/brand'
+import { SajuResultView } from '../components/saju'
+import { trackEvent } from '../lib/analytics'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
 export default function ResultPage() {
   const { shareToken } = useParams()
@@ -48,6 +49,7 @@ export default function ResultPage() {
         setReading(null)
       } else {
         setReading(data)
+        trackEvent('view_item', { content_type: 'shared_saju' })
       }
 
       setLoading(false)
@@ -61,11 +63,7 @@ export default function ResultPage() {
 
   return (
     <div className="page page--public">
-      <header className="mascot-hero">
-        <Mascot className="mascot--hero" />
-        <p className="mascot-hero-name">멍사주</p>
-        <p className="mascot-hero-copy">사실대로 말해주겠다멍.</p>
-      </header>
+      <MascotHero copy="사실대로 말해주겠다멍." />
 
       <main className="public-result">
         {loading && <p className="auth-status">공유 결과를 불러오는 중이다멍...</p>}
@@ -73,7 +71,13 @@ export default function ResultPage() {
         {!loading && reading && <SajuResultView reading={reading} />}
 
         <div className="public-result-actions">
-          <Link to="/" className="analyze-btn public-home-btn">
+          <Link
+            to="/"
+            className="analyze-btn public-home-btn"
+            onClick={() =>
+              trackEvent('cta_click', { cta: 'try_own_saju', page: 'shared_result' })
+            }
+          >
             내 사주도 보러 가기
           </Link>
         </div>
